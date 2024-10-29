@@ -1,194 +1,161 @@
-import tkinter as tk
-from tkinter import ttk
 import whisper
 import sounddevice as sd
 import numpy as np
-import queue
 import threading
-import pyttsx3
+import queue
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox
 
-# Function to get list of available input devices
-def get_input_devices():
+# Initialize the Whisper model
+print("Loading Whisper model...")
+model = whisper.load_model("base")  # Options: 'tiny', 'small', 'medium', 'large'
+print("Model loaded.")
+
+# Audio parameters
+SAMPLE_RATE = 16000  # Whisper expects 16000 Hz
+BLOCK_SIZE = 1024
+CHANNELS = 1  # Mono audio
+TRANSCRIPTION_CHUNK_DURATION = 5  # seconds
+
+# Queue to hold audio data
+audio_queue = queue.Queue()
+
+# Function to list available microphones
+def list_microphones():
     devices = sd.query_devices()
-    input_devices = []
-    for idx, device in enumerate(devices):
-        if device['max_input_channels'] > 0:
-            input_devices.append((idx, device['name']))
+    input_devices = [device for device in devices if device['max_input_channels'] > 0]
     return input_devices
 
+# GUI Application Class
 class TranscriptionApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Real-Time Speech Transcription with Whisper")
+        self.root.title("Live Speech Transcription")
+        self.root.geometry("800x600")
         
-        # Initialize audio parameters
-        self.sampling_rate = 16000  # Whisper models expect 16000 Hz audio
+        # Microphone Selection
+        self.microphone_label = ttk.Label(root, text="Select Microphone:")
+        self.microphone_label.pack(pady=5)
         
-        # Queues and threading events
-        self.audio_queue = queue.Queue()
-        self.tts_queue = queue.Queue()
-        self.stop_event = threading.Event()
+        self.microphone_var = tk.StringVar()
+        self.microphone_dropdown = ttk.Combobox(root, textvariable=self.microphone_var, state="readonly", width=50)
+        self.microphone_dropdown.pack(pady=5)
         
-        # Initialize TTS engine
-        self.tts_engine = pyttsx3.init()
+        self.populate_microphones()
         
-        # Create GUI elements
-        self.create_widgets()
-        
-        # Transcription and TTS threads
-        self.transcription_thread = None
-        self.tts_thread = None
-        
-        # Flag to check if transcription is running
-        self.is_running = False
-
-    def create_widgets(self):
-        # Device selection
-        devices = get_input_devices()
-        self.device_var = tk.StringVar()
-        self.device_var.set(f"{devices[0][0]}: {devices[0][1]}")  # Default to first input device
-
-        device_frame = tk.Frame(self.root)
-        device_frame.pack(pady=5)
-
-        device_label = tk.Label(device_frame, text="Select Input Device:")
-        device_label.pack(side=tk.LEFT)
-
-        self.device_menu = ttk.Combobox(device_frame, textvariable=self.device_var, values=[f"{idx}: {name}" for idx, name in devices], state="readonly", width=50)
-        self.device_menu.current(0)
-        self.device_menu.pack(side=tk.LEFT)
-
-        # Model size selection
-        model_sizes = ['tiny', 'base', 'small', 'medium', 'large']
-        self.model_var = tk.StringVar()
-        self.model_var.set('base')  # Default model size
-
-        model_frame = tk.Frame(self.root)
-        model_frame.pack(pady=5)
-
-        model_label = tk.Label(model_frame, text="Select Model Size:")
-        model_label.pack(side=tk.LEFT)
-
-        self.model_menu = ttk.Combobox(model_frame, textvariable=self.model_var, values=model_sizes, state="readonly", width=10)
-        self.model_menu.current(1)  # Set 'base' as default
-        self.model_menu.pack(side=tk.LEFT)
-
-        # Start/Stop button
-        self.start_button = tk.Button(self.root, text="Start Transcription", command=self.toggle_transcription)
+        # Start Button
+        self.start_button = ttk.Button(root, text="Start Transcription", command=self.start_transcription)
         self.start_button.pack(pady=10)
-
-        # Transcription display
-        self.transcription_text = tk.Text(self.root, height=15, width=80)
-        self.transcription_text.pack(pady=10)
-
-    def toggle_transcription(self):
-        if not self.is_running:
-            self.start_transcription()
-            self.start_button.config(text="Stop Transcription")
-            self.is_running = True
-        else:
-            self.stop_transcription()
-            self.start_button.config(text="Start Transcription")
-            self.is_running = False
-
+        
+        # Stop Button
+        self.stop_button = ttk.Button(root, text="Stop Transcription", command=self.stop_transcription, state="disabled")
+        self.stop_button.pack(pady=5)
+        
+        # Scrolled Text for Transcription Output
+        self.transcription_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=100, height=30, state='disabled')
+        self.transcription_area.pack(padx=10, pady=10)
+        
+        # Transcription Control
+        self.transcribing = False
+        self.audio_buffer = np.zeros((0, CHANNELS), dtype=np.float32)
+        self.stream = None
+        
+    def populate_microphones(self):
+        devices = list_microphones()
+        if not devices:
+            messagebox.showerror("Error", "No input devices found.")
+            self.root.destroy()
+            return
+        self.microphone_names = [f"{device['name']} (ID: {idx})" for idx, device in enumerate(devices)]
+        self.microphone_dropdown['values'] = self.microphone_names
+        self.microphone_dropdown.current(0)  # Select the first microphone by default
+    
     def start_transcription(self):
-        # Get selected device index
-        selected_device = int(self.device_menu.get().split(":")[0])
-        self.device_index = selected_device
-
-        # Get selected model size
-        selected_model_size = self.model_var.get()
-        self.load_model(selected_model_size)
-
-        # Start the transcription and TTS threads
-        self.stop_event.clear()
-        self.transcription_thread = threading.Thread(target=self.transcribe_audio)
+        selected_index = self.microphone_dropdown.current()
+        if selected_index == -1:
+            messagebox.showwarning("Warning", "Please select a microphone.")
+            return
+        device_id = list_microphones()[selected_index]['index']
+        
+        # Disable start button and enable stop button
+        self.start_button.config(state="disabled")
+        self.stop_button.config(state="normal")
+        
+        self.transcribing = True
+        
+        # Start the transcription thread
+        self.transcription_thread = threading.Thread(target=self.transcribe_audio, daemon=True)
         self.transcription_thread.start()
-
-        self.tts_thread = threading.Thread(target=self.speak_transcription)
-        self.tts_thread.start()
-
-        # Start audio stream in a separate thread to avoid blocking the GUI
-        self.audio_thread = threading.Thread(target=self.audio_stream)
-        self.audio_thread.start()
-
+        
+        # Start the audio stream
+        self.stream = sd.InputStream(callback=self.audio_callback,
+                                     channels=CHANNELS,
+                                     samplerate=SAMPLE_RATE,
+                                     blocksize=BLOCK_SIZE,
+                                     device=device_id,
+                                     dtype='float32')
+        self.stream.start()
+        
+        self.append_transcription("Transcription started...\n")
+    
     def stop_transcription(self):
-        # Stop the threads
-        self.stop_event.set()
-        self.transcription_thread.join()
-        self.tts_thread.join()
-        self.audio_thread.join()
-
-    def load_model(self, model_size):
-        # Load the Whisper model
-        self.model = whisper.load_model(model_size)
-        print(f"Loaded Whisper model '{model_size}'.")
-
-    def audio_stream(self):
-        # Start recording from the microphone
-        try:
-            with sd.InputStream(device=self.device_index, channels=1, samplerate=self.sampling_rate, callback=self.audio_callback):
-                while not self.stop_event.is_set():
-                    sd.sleep(100)
-        except Exception as e:
-            print(f"Error in audio stream: {e}")
-
+        self.transcribing = False
+        if self.stream:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+        self.start_button.config(state="normal")
+        self.stop_button.config(state="disabled")
+        self.append_transcription("\nTranscription stopped.")
+    
     def audio_callback(self, indata, frames, time, status):
         if status:
-            print(status, flush=True)
-        self.audio_queue.put(indata.copy())
-
+            print(f"Audio status: {status}")
+        if self.transcribing:
+            audio_queue.put(indata.copy())
+    
     def transcribe_audio(self):
-        audio_data = np.zeros((0, 1))
-        while not self.stop_event.is_set():
+        while self.transcribing:
             try:
-                # Get audio data from the queue
-                data = self.audio_queue.get(timeout=0.1)
-                audio_data = np.concatenate((audio_data, data), axis=0)
-
-                # Transcribe when we have enough audio (e.g., every 5 seconds)
-                if len(audio_data) >= self.sampling_rate * 5:
-                    # Preprocess the audio to match Whisper's requirements
-                    audio = whisper.pad_or_trim(audio_data.flatten())
-
-                    # Create the log-Mel spectrogram
-                    mel = whisper.log_mel_spectrogram(audio).to(self.model.device)
-
-                    # Detect the spoken language (optional)
-                    _, probs = self.model.detect_language(mel)
-                    language = max(probs, key=probs.get)
-                    print(f"\nDetected language: {language}")
-
-                    # Perform the transcription
-                    options = whisper.DecodingOptions(language=language)
-                    result = whisper.decode(self.model, mel, options)
-
-                    # Update the GUI with the transcription
-                    self.root.after(0, self.update_transcription, result.text)
-
-                    # Put the transcription text into the TTS queue
-                    self.tts_queue.put(result.text)
-
-                    # Reset audio data
-                    audio_data = np.zeros((0, 1))
+                data = audio_queue.get(timeout=1)
+                self.audio_buffer = np.concatenate((self.audio_buffer, data), axis=0)
+                if len(self.audio_buffer) >= SAMPLE_RATE * TRANSCRIPTION_CHUNK_DURATION:
+                    # Prepare audio chunk
+                    audio_chunk = self.audio_buffer[:SAMPLE_RATE * TRANSCRIPTION_CHUNK_DURATION]
+                    self.audio_buffer = self.audio_buffer[SAMPLE_RATE * TRANSCRIPTION_CHUNK_DURATION:]
+                    
+                    # Flatten the audio data
+                    audio_flat = audio_chunk.flatten()
+                    
+                    # Transcribe the audio chunk
+                    result = model.transcribe(audio_flat, language='en')
+                    transcription = result['text'].strip()
+                    
+                    if transcription:
+                        self.append_transcription(f"You said: {transcription}\n")
             except queue.Empty:
                 continue
+            except Exception as e:
+                self.append_transcription(f"Error during transcription: {e}\n")
+    
+    def append_transcription(self, text):
+        # Ensure thread-safe GUI updates
+        self.transcription_area.configure(state='normal')
+        self.transcription_area.insert(tk.END, text)
+        self.transcription_area.see(tk.END)
+        self.transcription_area.configure(state='disabled')
 
-    def update_transcription(self, text):
-        self.transcription_text.insert(tk.END, text + '\n')
-        self.transcription_text.see(tk.END)
-
-    def speak_transcription(self):
-        while not self.stop_event.is_set():
-            try:
-                # Get the text to speak from the queue
-                text = self.tts_queue.get(timeout=0.1)
-                self.tts_engine.say(text)
-                self.tts_engine.runAndWait()
-            except queue.Empty:
-                continue
-
-if __name__ == "__main__":
+# Main function to run the GUI
+def main():
     root = tk.Tk()
     app = TranscriptionApp(root)
+    root.protocol("WM_DELETE_WINDOW", lambda: on_closing(app, root))
     root.mainloop()
+
+def on_closing(app, root):
+    if messagebox.askokcancel("Quit", "Do you want to quit?"):
+        app.stop_transcription()
+        root.destroy()
+
+if __name__ == "__main__":
+    main()
