@@ -1,0 +1,11 @@
+pip install git+https://github.com/openai/whisper.git
+pip install torch
+pip install sounddevice
+pip install numpy
+pip install googletrans==4.0.0rc1
+pip install pyttsx3
+pip install gTTS
+pip install soundfile
+pip install pydub
+pip install playsound==1.2.2
+pip install pywin32  # Windows only
