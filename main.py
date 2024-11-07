@@ -14,16 +14,42 @@ from playsound import playsound
 import tempfile
 import os
 import logging
+import datetime  # Ensure datetime is imported
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("transcription_times.log"),
-        logging.StreamHandler()
-    ]
-)
+# 1. Setup Logging with Timestamped Log Files
+def setup_logging():
+    logger = logging.getLogger("TranscriptionApp")
+    logger.setLevel(logging.INFO)  # Set the desired logging level
+
+    # Create log directory if it doesn't exist
+    log_directory = "./logs"
+    os.makedirs(log_directory, exist_ok=True)
+
+    # Generate timestamp for the log filename
+    # Format: YYYY-MM-DD_HH-MM-SS
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_filename = f"{timestamp}.log"  # Removed 'transcription_times' prefix
+    log_path = os.path.join(log_directory, log_filename)
+
+    # Create handlers
+    file_handler = logging.FileHandler(log_path)
+    console_handler = logging.StreamHandler()
+
+    # Create formatters and add them to handlers
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    if not logger.handlers:
+        logger.addHandler(file_handler)
+        logger.addHandler(console_handler)
+
+    logger.info(f"Logging is set up successfully. Logs are being saved to {log_path}")
+    return logger
+
+# Initialize logger
+logger = setup_logging()
 
 # Audio parameters
 SAMPLE_RATE = 16000  # Whisper expects 16000 Hz
@@ -82,11 +108,11 @@ def list_microphones():
         devices = sd.query_devices()
         input_devices = [device for device in devices if device['max_input_channels'] > 0]
         output_devices = [device for device in devices if device['max_output_channels'] > 0]
-        logging.info(f"Total Input Devices Found: {len(input_devices)}")
-        logging.info(f"Total Output Devices Found: {len(output_devices)}")
+        logger.info(f"Total Input Devices Found: {len(input_devices)}")
+        logger.info(f"Total Output Devices Found: {len(output_devices)}")
         return input_devices, output_devices
     except Exception as e:
-        logging.error(f"Error querying devices: {e}")
+        logger.error(f"Error querying devices: {e}", exc_info=True)
         return [], []
 
 # GUI Application Class
@@ -113,15 +139,13 @@ class TranscriptionApp:
         self.gui_queue = queue.Queue()
 
         # Initialize TTS engine
-        self.tts_engine = pyttsx3.init()
-        # Optionally, set properties like voice, rate, volume here
-        # Example:
-        # voices = self.tts_engine.getProperty('voices')
-        # self.tts_engine.setProperty('voice', voices[0].id)  # Select a voice
-        # self.tts_engine.setProperty('rate', 150)  # Set speech rate
-
-        # Log application start
-        logging.info("Application initialized.")
+        try:
+            self.tts_engine = pyttsx3.init()
+            logger.info("pyttsx3 TTS engine initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize pyttsx3 TTS engine: {e}", exc_info=True)
+            messagebox.showerror("TTS Initialization Error", f"Failed to initialize TTS engine.\nError: {e}")
+            self.root.destroy()
 
         # Create GUI components first
         self.create_widgets()
@@ -227,7 +251,7 @@ class TranscriptionApp:
         self.save_button = ttk.Button(control_frame, text="Save Transcription", command=self.save_transcription)
         self.save_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Frame for Process Durations (New Box)
+        # Frame for Process Durations
         status_frame = ttk.LabelFrame(self.root, text="Process Durations")
         status_frame.pack(padx=10, pady=10, fill="x")
 
@@ -250,38 +274,39 @@ class TranscriptionApp:
         input_devices, _ = list_microphones()
         if not input_devices:
             error_msg = "No input devices found."
+            logger.error(error_msg)
             messagebox.showerror("Error", error_msg)
-            logging.error(error_msg)
             self.root.destroy()
             return
         self.microphone_names = [f"{device['name']} (ID: {idx})" for idx, device in enumerate(input_devices)]
         self.microphone_dropdown['values'] = self.microphone_names
         self.microphone_dropdown.current(0)  # Select the first microphone by default
-        logging.info(f"Detected Microphones: {self.microphone_names}")
+        logger.info(f"Detected Microphones: {self.microphone_names}")
 
     def populate_output_speakers(self):
         _, output_devices = list_microphones()
         if not output_devices:
             error_msg = "No output devices found."
+            logger.error(error_msg)
             messagebox.showerror("Error", error_msg)
-            logging.error(error_msg)
             self.root.destroy()
             return
         self.output_device_names = [f"{device['name']} (ID: {idx})" for idx, device in enumerate(output_devices)]
         self.speaker_dropdown['values'] = self.output_device_names
         self.speaker_dropdown.current(0)  # Select the first speaker by default
-        logging.info(f"Detected Output Devices: {self.output_device_names}")
+        logger.info(f"Detected Output Devices: {self.output_device_names}")
 
     def load_model(self, model_name):
         try:
             self.append_transcription(f"Loading Whisper model '{model_name}'...\n")
+            logger.info(f"Loading Whisper model '{model_name}'.")
             self.model = whisper.load_model(model_name)
             self.append_transcription(f"Model '{model_name}' loaded successfully.\n")
-            logging.info(f"Whisper model '{model_name}' loaded successfully.")
+            logger.info(f"Whisper model '{model_name}' loaded successfully.")
         except Exception as e:
+            logger.error(f"Failed to load Whisper model '{model_name}': {e}", exc_info=True)
             messagebox.showerror("Model Loading Error", f"Failed to load model '{model_name}'.\nError: {e}")
             self.append_transcription(f"Error loading model '{model_name}': {e}\n")
-            logging.error(f"Failed to load model '{model_name}'. Error: {e}")
 
     def on_model_change(self, event):
         selected_model = self.current_model_name.get()
@@ -319,6 +344,7 @@ class TranscriptionApp:
         self.translation_time_label.config(text="Translation Time: N/A")
 
         self.transcribing = True
+        logger.info("Transcription started.")
 
         # Start the transcription thread
         self.transcription_thread = threading.Thread(target=self.transcribe_audio, daemon=True)
@@ -336,11 +362,11 @@ class TranscriptionApp:
             )
             self.stream.start()
             self.append_transcription("Transcription started...\n")
-            logging.info("Transcription started.")
+            logger.info("Audio stream started successfully.")
         except Exception as e:
+            logger.error(f"Failed to start audio stream: {e}", exc_info=True)
             messagebox.showerror("Audio Stream Error", f"Failed to start audio stream.\nError: {e}")
             self.append_transcription(f"Error starting audio stream: {e}\n")
-            logging.error(f"Failed to start audio stream. Error: {e}")
             self.start_button.config(state="normal")
             self.stop_button.config(state="disabled")
             self.model_dropdown.config(state="readonly")
@@ -356,6 +382,7 @@ class TranscriptionApp:
             self.stream.stop()
             self.stream.close()
             self.stream = None
+            logger.info("Audio stream stopped.")
         self.start_button.config(state="normal")
         self.stop_button.config(state="disabled")
         self.model_dropdown.config(state="readonly")
@@ -364,12 +391,12 @@ class TranscriptionApp:
         self.source_language_dropdown.config(state="readonly")
         self.translation_dropdown.config(state="readonly")
         self.append_transcription("\nTranscription stopped.\n")
-        logging.info("Transcription stopped.")
+        logger.info("Transcription stopped.")
 
     def audio_callback(self, indata, frames, time_info, status):
         if status:
+            logger.warning(f"Audio status: {status}")
             print(f"Audio status: {status}")
-            logging.warning(f"Audio status: {status}")
         if self.transcribing:
             audio_queue.put(indata.copy())
 
@@ -392,6 +419,7 @@ class TranscriptionApp:
 
                     # Transcribe the audio chunk
                     self.gui_queue.put({'transcription': "Transcribing...\n"})
+                    logger.info("Transcribing audio chunk.")
 
                     # Start time for transcription
                     transcription_start_time = time.time()
@@ -415,7 +443,7 @@ class TranscriptionApp:
                             'transcription_time': f"Transcription Time: {transcription_duration_formatted}",
                             'transcription_update': True
                         })
-                        logging.info(f"Transcription completed in {transcription_duration_formatted}")
+                        logger.info(f"Transcription completed in {transcription_duration_formatted}")
 
                         # Translate if a target language is selected
                         target_language = self.translation_var.get()
@@ -438,14 +466,14 @@ class TranscriptionApp:
                                     'translation_update': True,
                                     'translated_text': translated_text  # Include translated text for TTS
                                 })
-                                logging.info(f"Translation completed in {translation_duration_formatted}")
+                                logger.info(f"Translation completed in {translation_duration_formatted}")
             except queue.Empty:
                 continue
             except Exception as e:
                 # Log the error and put it into the queue
                 error_message = f"Error during transcription: {e}\n"
                 self.gui_queue.put({'error': error_message})
-                logging.error(f"Error during transcription: {e}")
+                logger.error(f"Error during transcription: {e}", exc_info=True)
 
     def translate_text(self, text, target_language):
         try:
@@ -453,10 +481,11 @@ class TranscriptionApp:
             if not lang_code:
                 return None
             translation = self.translator.translate(text, dest=lang_code)
+            logger.info(f"Translated text to {target_language}: {translation.text}")
             return translation.text
         except Exception as e:
             self.gui_queue.put({'error': f"Error during translation: {e}\n"})
-            logging.error(f"Error during translation: {e}")
+            logger.error(f"Error during translation: {e}", exc_info=True)
             return None
 
     def append_transcription(self, text, tag='default'):
@@ -516,6 +545,7 @@ class TranscriptionApp:
 
                 # Remove the temporary file
                 os.remove(temp_filename)
+                logger.info("Played TTS audio using pyttsx3.")
             elif target_language == 'Mandarin':
                 # Use gTTS for Mandarin
                 tts = gTTS(text=text, lang='zh-cn')
@@ -528,6 +558,7 @@ class TranscriptionApp:
 
                 # Remove the temporary file
                 os.remove(temp_filename)
+                logger.info("Played TTS audio using gTTS for Mandarin.")
             else:
                 # Handle other languages as needed
                 self.tts_engine.setProperty('voice', self.get_default_voice())
@@ -542,16 +573,18 @@ class TranscriptionApp:
                 sd.wait()
 
                 os.remove(temp_filename)
+                logger.info(f"Played TTS audio using pyttsx3 for {target_language}.")
         except Exception as e:
             error_message = f"Error during Text-to-Speech: {e}\n"
             self.gui_queue.put({'error': error_message})
-            logging.error(f"Error during Text-to-Speech: {e}")
+            logger.error(f"Error during Text-to-Speech: {e}", exc_info=True)
 
     def get_default_voice(self):
         """Returns the default voice."""
         voices = self.tts_engine.getProperty('voices')
         if voices:
             return voices[0].id
+        logger.warning("No voices available in pyttsx3.")
         return None
 
     def save_transcription(self):
@@ -561,13 +594,13 @@ class TranscriptionApp:
                 with open("transcription.txt", "w", encoding="utf-8") as f:
                     f.write(transcription_text)
                 messagebox.showinfo("Saved", "Transcription saved to transcription.txt")
-                logging.info("Transcription saved to transcription.txt")
+                logger.info("Transcription saved to transcription.txt")
             except Exception as e:
                 messagebox.showerror("Save Error", f"Failed to save transcription.\nError: {e}")
-                logging.error(f"Failed to save transcription. Error: {e}")
+                logger.error(f"Failed to save transcription. Error: {e}", exc_info=True)
         else:
             messagebox.showwarning("Warning", "No transcription to save.")
-            logging.warning("Save Transcription attempted with no content.")
+            logger.warning("Save Transcription attempted with no content.")
 
 # Main function to run the GUI
 def main():
@@ -583,9 +616,10 @@ def on_closing(app, root):
         # Stop the TTS engine gracefully
         try:
             app.tts_engine.stop()
-        except:
-            pass
-        logging.info("Application closed.")
+            logger.info("TTS engine stopped gracefully.")
+        except Exception as e:
+            logger.error(f"Error stopping TTS engine: {e}", exc_info=True)
+        logger.info("Application closed.")
         root.destroy()
 
 if __name__ == "__main__":
