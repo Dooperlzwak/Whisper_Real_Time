@@ -8,4 +8,4 @@ pip install gTTS
 pip install soundfile
 pip install pydub
 pip install playsound==1.2.2
-pip install pywin32  # Windows only
+pip install pywin32
