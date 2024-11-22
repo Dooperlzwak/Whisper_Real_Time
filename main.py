@@ -751,7 +751,7 @@ class TranscriptionApp:
                 app.tts_queue.put(None)
                 app.tts_thread.join()
                 app.tts_engine.stop()
-                logger.info("TTS engine stopped gracefully.")
+                logger.info("TTS engine stopped.")
             except Exception as e:
                 logger.error(f"Error stopping TTS engine: {e}", exc_info=True)
             logger.info("Application closed.")
