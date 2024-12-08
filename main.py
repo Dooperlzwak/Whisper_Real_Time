@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import whisper
+import torch  # Import torch to check for CUDA availability
 import sounddevice as sd
 import numpy as np
 import threading
@@ -15,10 +16,8 @@ import tempfile
 import os
 import logging
 import datetime
-import torch
-from tkinter import messagebox
 import json
-from tkinter import colorchooser
+from tkinter import messagebox, colorchooser
 
 def setup_logging():
     logger = logging.getLogger("TranscriptionApp")
@@ -135,6 +134,7 @@ class TranscriptionApp:
         self.process_queue()
 
     def create_widgets(self):
+        # Header Frame
         header_frame = ctk.CTkFrame(self.root)
         header_frame.pack(padx=10, pady=10, fill="x")
         title_label = ctk.CTkLabel(header_frame, text="Live Speech Transcription", font=("Roboto Medium", 20))
@@ -143,6 +143,8 @@ class TranscriptionApp:
         header_spacer.pack(side=ctk.LEFT, padx=5, pady=5)
         settings_button = ctk.CTkButton(header_frame, text="⚙️", command=self.open_settings, width=40, height=40)
         settings_button.pack(side=ctk.RIGHT, padx=5, pady=5)
+
+        # Model Selection
         model_frame = ctk.CTkFrame(self.root)
         model_frame.pack(padx=10, pady=10, fill="x")
         model_label = ctk.CTkLabel(model_frame, text="Select Whisper Model:", font=("Roboto Medium", 16))
@@ -155,8 +157,12 @@ class TranscriptionApp:
             width=200
         )
         self.model_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Device Selection
         device_frame = ctk.CTkFrame(self.root)
         device_frame.pack(padx=10, pady=10, fill="x")
+
+        # Microphone
         mic_frame = ctk.CTkFrame(device_frame)
         mic_frame.pack(side=ctk.LEFT, padx=5, pady=5, expand=True, fill="x")
         mic_label = ctk.CTkLabel(mic_frame, text="Select Microphone:", font=("Roboto Medium", 16))
@@ -168,6 +174,8 @@ class TranscriptionApp:
             width=400
         )
         self.microphone_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Speaker Output
         speaker_frame = ctk.CTkFrame(device_frame)
         speaker_frame.pack(side=ctk.LEFT, padx=5, pady=5, expand=True, fill="x")
         speaker_label = ctk.CTkLabel(speaker_frame, text="Select Speaker Output:", font=("Roboto Medium", 16))
@@ -179,8 +187,12 @@ class TranscriptionApp:
             width=400
         )
         self.speaker_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Language Selection
         language_frame = ctk.CTkFrame(self.root)
         language_frame.pack(padx=10, pady=10, fill="x")
+
+        # Source Language
         source_lang_frame = ctk.CTkFrame(language_frame)
         source_lang_frame.pack(side=ctk.LEFT, padx=5, pady=5, expand=True, fill="x")
         source_lang_label = ctk.CTkLabel(source_lang_frame, text="Select Source Language:", font=("Roboto Medium", 16))
@@ -192,6 +204,8 @@ class TranscriptionApp:
             width=200
         )
         self.source_language_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Target Language
         translation_frame = ctk.CTkFrame(language_frame)
         translation_frame.pack(side=ctk.LEFT, padx=5, pady=5, expand=True, fill="x")
         translation_label = ctk.CTkLabel(translation_frame, text="Select Target Language:", font=("Roboto Medium", 16))
@@ -203,6 +217,8 @@ class TranscriptionApp:
             width=200
         )
         self.translation_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Control Buttons
         control_frame = ctk.CTkFrame(self.root)
         control_frame.pack(padx=10, pady=10, fill="x")
         self.start_button = ctk.CTkButton(control_frame, text="Start Transcription", command=self.start_transcription, width=150)
@@ -211,17 +227,22 @@ class TranscriptionApp:
         self.stop_button.pack(side=ctk.LEFT, padx=5, pady=5)
         self.save_button = ctk.CTkButton(control_frame, text="Save Transcription", command=self.save_transcription, width=150)
         self.save_button.pack(side=ctk.LEFT, padx=5, pady=5)
+
+        # Status Labels
         status_frame = ctk.CTkFrame(self.root)
         status_frame.pack(padx=10, pady=10, fill="x")
         self.transcription_time_label = ctk.CTkLabel(status_frame, text="Transcription Time: N/A", font=("Roboto Medium", 14))
         self.transcription_time_label.pack(side=ctk.LEFT, padx=10, pady=5)
         self.translation_time_label = ctk.CTkLabel(status_frame, text="Translation Time: N/A", font=("Roboto Medium", 14))
         self.translation_time_label.pack(side=ctk.LEFT, padx=10, pady=5)
+
+        # Transcription Area
         transcription_label = ctk.CTkLabel(self.root, text="Transcription:", font=("Roboto Medium", 16))
         transcription_label.pack(padx=10, pady=(10, 0), anchor="w")
         self.transcription_area = ctk.CTkTextbox(self.root, wrap='word', width=1400, height=600)
         self.transcription_area.pack(padx=10, pady=5, fill="both", expand=True)
         self.transcription_area.configure(state='disabled')
+
         if self.preferences.get('accessibility', False):
             self.enable_accessibility()
 
@@ -230,6 +251,7 @@ class TranscriptionApp:
         settings_window.title("Settings")
         settings_window.geometry("400x400")
         settings_window.grab_set()
+
         mode_frame = ctk.CTkFrame(settings_window)
         mode_frame.pack(padx=10, pady=10, fill="x")
         mode_label = ctk.CTkLabel(mode_frame, text="Appearance Mode:", font=("Roboto Medium", 16))
@@ -241,12 +263,14 @@ class TranscriptionApp:
             self.mode_switch.select()
         else:
             self.mode_switch.deselect()
+
         color_frame = ctk.CTkFrame(settings_window)
         color_frame.pack(padx=10, pady=10, fill="x")
         color_label = ctk.CTkLabel(color_frame, text="Primary Color:", font=("Roboto Medium", 16))
         color_label.pack(side=ctk.LEFT, padx=5, pady=5)
         self.color_button = ctk.CTkButton(color_frame, text="Choose Color", command=self.pick_primary_color, width=120)
         self.color_button.pack(side=ctk.LEFT, padx=5, pady=5)
+
         preset_frame = ctk.CTkFrame(settings_window)
         preset_frame.pack(padx=10, pady=10, fill="x")
         preset_label = ctk.CTkLabel(preset_frame, text="Preset Color Schemes:", font=("Roboto Medium", 16))
@@ -266,6 +290,7 @@ class TranscriptionApp:
         )
         self.preset_dropdown.pack(side=ctk.LEFT, padx=5, pady=5)
         self.preset_dropdown.set("Select Scheme")
+
         accessibility_frame = ctk.CTkFrame(settings_window)
         accessibility_frame.pack(padx=10, pady=10, fill="x")
         accessibility_label = ctk.CTkLabel(accessibility_frame, text="Enable Accessibility:", font=("Roboto Medium", 16))
@@ -274,6 +299,7 @@ class TranscriptionApp:
         self.accessibility_switch.pack(side=ctk.LEFT, padx=5, pady=5)
         if self.preferences.get('accessibility', False):
             self.accessibility_switch.select()
+
         save_button = ctk.CTkButton(settings_window, text="Save Preferences", command=self.save_preferences, width=150)
         save_button.pack(padx=10, pady=20)
 
@@ -299,6 +325,7 @@ class TranscriptionApp:
                 elif isinstance(widget, ctk.CTkLabel):
                     text = widget.cget("text") or 'Label'
                     self.speak_text_immediate(f"Label: {text}")
+
         widgets = self.root.winfo_children()
         for widget in widgets:
             self.bind_accessibility(widget, announce)
@@ -319,6 +346,7 @@ class TranscriptionApp:
             elif isinstance(widget, (ctk.CTkFrame, ctk.CTkScrollableFrame)):
                 for child in widget.winfo_children():
                     unbind_events(child)
+
         widgets = self.root.winfo_children()
         for widget in widgets:
             unbind_events(widget)
@@ -397,7 +425,7 @@ class TranscriptionApp:
             messagebox.showerror("Error", error_msg)
             self.root.destroy()
             return
-        self.microphone_names = [f"{device['name']} (ID: {idx})" for idx, device in enumerate(input_devices)]
+        self.microphone_names = [f"{device['name']} (ID: {device['index']})" for device in input_devices]
         self.microphone_dropdown.configure(values=self.microphone_names)
         self.microphone_dropdown.set(self.microphone_names[0])
         logger.info(f"Detected Microphones: {self.microphone_names}")
@@ -410,18 +438,19 @@ class TranscriptionApp:
             messagebox.showerror("Error", error_msg)
             self.root.destroy()
             return
-        self.output_device_names = [f"{device['name']} (ID: {idx})" for idx, device in enumerate(output_devices)]
+        self.output_device_names = [f"{device['name']} (ID: {device['index']})" for device in output_devices]
         self.speaker_dropdown.configure(values=self.output_device_names)
         self.speaker_dropdown.set(self.output_device_names[0])
         logger.info(f"Detected Output Devices: {self.output_device_names}")
 
     def load_model(self, model_name):
         try:
-            self.append_transcription(f"Loading Whisper model '{model_name}'...\n")
-            logger.info(f"Loading Whisper model '{model_name}'.")
-            self.model = whisper.load_model(model_name, device='cpu')
-            self.append_transcription(f"Model '{model_name}' loaded successfully.\n")
-            logger.info(f"Whisper model '{model_name}' loaded successfully.")
+            device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            self.append_transcription(f"Loading Whisper model '{model_name}' on {device}...\n")
+            logger.info(f"Loading Whisper model '{model_name}' on {device}.")
+            self.model = whisper.load_model(model_name, device=device)
+            self.append_transcription(f"Model '{model_name}' loaded successfully on {device}.\n")
+            logger.info(f"Whisper model '{model_name}' loaded successfully on {device}.")
         except Exception as e:
             logger.error(f"Failed to load Whisper model '{model_name}': {e}", exc_info=True)
             messagebox.showerror("Model Loading Error", f"Failed to load model '{model_name}'.\nError: {e}")
@@ -430,37 +459,20 @@ class TranscriptionApp:
     def on_model_change(self, selected_model):
         if self.transcribing:
             messagebox.showwarning("Transcription Active", "Please stop transcription before changing the model.")
-            self.model_dropdown.set(self.model.name if self.model else "base")
+            self.model_dropdown.set(self.current_model_name.get())
             return
+        self.current_model_name.set(selected_model)
         self.load_model(selected_model)
 
     def start_transcription(self):
         logger.info("Start Transcription button clicked.")
         selected_mic_name = self.microphone_dropdown.get()
-        if selected_mic_name in self.microphone_names:
-            selected_input_index = self.microphone_names.index(selected_mic_name)
-        else:
-            selected_input_index = -1
-        if selected_input_index == -1:
-            messagebox.showwarning("Warning", "Please select a microphone.")
-            logger.warning("Start Transcription: No microphone selected.")
-            return
         selected_output_name = self.speaker_dropdown.get()
-        if selected_output_name in self.output_device_names:
-            selected_output_index = self.output_device_names.index(selected_output_name)
-        else:
-            selected_output_index = -1
-        if selected_output_index == -1:
-            messagebox.showwarning("Warning", "Please select a speaker output.")
-            logger.warning("Start Transcription: No speaker output selected.")
+        device_id = self.get_device_id(selected_mic_name, input_device=True)
+        output_device_id = self.get_device_id(selected_output_name, input_device=False)
+        if device_id is None or output_device_id is None:
             return
-        input_devices, output_devices = list_microphones()
-        if selected_input_index >= len(input_devices) or selected_output_index >= len(output_devices):
-            messagebox.showerror("Selection Error", "Selected device index out of range.")
-            logger.error("Start Transcription: Selected device index out of range.")
-            return
-        device_id = input_devices[selected_input_index]['index']
-        output_device_id = output_devices[selected_output_index]['index']
+
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.model_dropdown.configure(state="disabled")
@@ -492,11 +504,11 @@ class TranscriptionApp:
             self.append_transcription(f"Error starting audio stream: {e}\n")
             self.start_button.configure(state="normal")
             self.stop_button.configure(state="disabled")
-            self.model_dropdown.configure(state="readonly")
-            self.microphone_dropdown.configure(state="readonly")
-            self.speaker_dropdown.configure(state="readonly")
-            self.source_language_dropdown.configure(state="readonly")
-            self.translation_dropdown.configure(state="readonly")
+            self.model_dropdown.configure(state="normal")
+            self.microphone_dropdown.configure(state="normal")
+            self.speaker_dropdown.configure(state="normal")
+            self.source_language_dropdown.configure(state="normal")
+            self.translation_dropdown.configure(state="normal")
             self.transcribing = False
 
     def stop_transcription(self):
@@ -512,18 +524,17 @@ class TranscriptionApp:
                 logger.error(f"Error stopping audio stream: {e}", exc_info=True)
         self.start_button.configure(state="normal")
         self.stop_button.configure(state="disabled")
-        self.model_dropdown.configure(state="readonly")
-        self.microphone_dropdown.configure(state="readonly")
-        self.speaker_dropdown.configure(state="readonly")
-        self.source_language_dropdown.configure(state="readonly")
-        self.translation_dropdown.configure(state="readonly")
+        self.model_dropdown.configure(state="normal")
+        self.microphone_dropdown.configure(state="normal")
+        self.speaker_dropdown.configure(state="normal")
+        self.source_language_dropdown.configure(state="normal")
+        self.translation_dropdown.configure(state="normal")
         self.append_transcription("\nTranscription stopped.\n")
         logger.info("Transcription stopped.")
 
     def audio_callback(self, indata, frames, time_info, status):
         if status:
             logger.warning(f"Audio status: {status}")
-            print(f"Audio status: {status}")
         if self.transcribing:
             audio_queue.put(indata.copy())
 
@@ -602,10 +613,10 @@ class TranscriptionApp:
             self.gui_queue.put({'error': f"Error during translation: {e}\n"})
             return None
 
-    def append_transcription(self, text, tag='default'):
+    def append_transcription(self, text):
         self.transcription_area.configure(state='normal')
-        self.transcription_area.insert(ctk.END, text, tag)
-        self.transcription_area.see(ctk.END)
+        self.transcription_area.insert('end', text)
+        self.transcription_area.see('end')
         self.transcription_area.configure(state='disabled')
 
     def process_queue(self):
@@ -613,11 +624,11 @@ class TranscriptionApp:
             while True:
                 message = self.gui_queue.get_nowait()
                 if 'transcription' in message:
-                    self.append_transcription(message['transcription'], 'transcription')
+                    self.append_transcription(message['transcription'])
                 if 'transcription_time' in message and message.get('transcription_update'):
                     self.transcription_time_label.configure(text=message['transcription_time'])
                 if 'translation' in message:
-                    self.append_transcription(message['translation'], 'translation')
+                    self.append_transcription(message['translation'])
                 if 'translation_time' in message and message.get('translation_update'):
                     self.translation_time_label.configure(text=message['translation_time'])
                 if 'translated_text' in message:
@@ -640,70 +651,15 @@ class TranscriptionApp:
     def speak_text(self, text):
         try:
             target_language = self.translation_var.get()
-            if target_language == 'None':
-                voice_id = self.get_default_voice()
-                if voice_id:
-                    self.tts_engine.setProperty('voice', voice_id)
-                else:
-                    logger.warning("No default voice found. Skipping TTS.")
-                    return
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tf:
-                    temp_filename = tf.name
-                self.tts_engine.save_to_file(text, temp_filename)
-                self.tts_engine.runAndWait()
-                selected_output_name = self.speaker_dropdown.get()
-                if selected_output_name in self.output_device_names:
-                    selected_output_index = self.output_device_names.index(selected_output_name)
-                else:
-                    selected_output_index = -1
-                _, output_devices = list_microphones()
-                if selected_output_index >= len(output_devices) or selected_output_index == -1:
-                    logger.error("Selected output device index out of range.")
-                    self.gui_queue.put({'error': "Selected output device index out of range.\n"})
-                    return
-                output_device_id = output_devices[selected_output_index]['index']
-                data, fs = sf.read(temp_filename, dtype='float32')
-                sd.play(data, fs, device=output_device_id)
-                sd.wait()
-                os.remove(temp_filename)
-                logger.info("Played TTS audio using pyttsx3.")
-            elif target_language == 'Mandarin':
-                tts = gTTS(text=text, lang='zh-cn')
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tf:
-                    temp_filename = tf.name
-                tts.save(temp_filename)
-                audio = AudioSegment.from_mp3(temp_filename)
-                play(audio)
-                os.remove(temp_filename)
-                logger.info("Played TTS audio using gTTS for Mandarin.")
-            else:
-                logger.warning(f"TTS for language '{target_language}' is not specifically handled. Using default voice.")
-                voice_id = self.get_default_voice()
-                if voice_id:
-                    self.tts_engine.setProperty('voice', voice_id)
-                else:
-                    logger.warning("No default voice found. Skipping TTS.")
-                    return
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tf:
-                    temp_filename = tf.name
-                self.tts_engine.save_to_file(text, temp_filename)
-                self.tts_engine.runAndWait()
-                selected_output_name = self.speaker_dropdown.get()
-                if selected_output_name in self.output_device_names:
-                    selected_output_index = self.output_device_names.index(selected_output_name)
-                else:
-                    selected_output_index = -1
-                _, output_devices = list_microphones()
-                if selected_output_index >= len(output_devices) or selected_output_index == -1:
-                    logger.error("Selected output device index out of range.")
-                    self.gui_queue.put({'error': "Selected output device index out of range.\n"})
-                    return
-                output_device_id = output_devices[selected_output_index]['index']
-                data, fs = sf.read(temp_filename, dtype='float32')
-                sd.play(data, fs, device=output_device_id)
-                sd.wait()
-                os.remove(temp_filename)
-                logger.info(f"Played TTS audio using pyttsx3 for {target_language}.")
+            lang_code = TRANSLATION_LANGUAGE_CODES.get(target_language, 'en')
+            tts = gTTS(text=text, lang=lang_code)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tf:
+                temp_filename = tf.name
+            tts.save(temp_filename)
+            audio = AudioSegment.from_mp3(temp_filename)
+            play(audio)
+            os.remove(temp_filename)
+            logger.info(f"Played TTS audio using gTTS for {target_language}.")
         except Exception as e:
             error_message = f"Error during Text-to-Speech: {e}\n"
             self.gui_queue.put({'error': error_message})
@@ -716,20 +672,19 @@ class TranscriptionApp:
         except Exception as e:
             logger.error(f"Error during immediate TTS: {e}", exc_info=True)
 
-    def get_default_voice(self):
-        try:
-            voices = self.tts_engine.getProperty('voices')
-            if voices:
-                return voices[0].id
-            logger.warning("No voices available in pyttsx3.")
-            return None
-        except Exception as e:
-            logger.error(f"Error retrieving voices from pyttsx3: {e}", exc_info=True)
-            return None
+    def get_device_id(self, device_name, input_device=True):
+        devices = list_microphones()[0] if input_device else list_microphones()[1]
+        for device in devices:
+            name = f"{device['name']} (ID: {device['index']})"
+            if name == device_name:
+                return device['index']
+        messagebox.showerror("Device Error", f"Selected device '{device_name}' not found.")
+        logger.error(f"Selected device '{device_name}' not found.")
+        return None
 
     def save_transcription(self):
         logger.info("Save Transcription button clicked.")
-        transcription_text = self.transcription_area.get("0.0", ctk.END).strip()
+        transcription_text = self.transcription_area.get("0.0", 'end').strip()
         if transcription_text:
             try:
                 with open("transcription.txt", "w", encoding="utf-8") as f:
@@ -743,24 +698,24 @@ class TranscriptionApp:
             messagebox.showwarning("Warning", "No transcription to save.")
             logger.warning("Save Transcription attempted with no content.")
 
-    def on_closing(self, app, root):
+    def on_closing(self):
         if messagebox.askokcancel("Quit", "Do you want to quit?"):
-            if app.transcribing:
-                app.stop_transcription()
+            if self.transcribing:
+                self.stop_transcription()
             try:
-                app.tts_queue.put(None)
-                app.tts_thread.join()
-                app.tts_engine.stop()
-                logger.info("TTS engine stopped.")
+                self.tts_queue.put(None)
+                self.tts_thread.join()
+                self.tts_engine.stop()
+                logger.info("TTS engine stopped gracefully.")
             except Exception as e:
                 logger.error(f"Error stopping TTS engine: {e}", exc_info=True)
             logger.info("Application closed.")
-            root.destroy()
+            self.root.destroy()
 
 def main():
     root = ctk.CTk()
     app = TranscriptionApp(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: app.on_closing(app, root))
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
     root.mainloop()
 
 if __name__ == "__main__":
